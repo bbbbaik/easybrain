@@ -3,17 +3,8 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
-import { PageProvider, usePageContext } from '@/contexts/PageContext'
 import Sidebar from '@/components/Sidebar'
 import PageEditor from '@/components/PageEditor'
-
-function MainContent() {
-  return (
-    <main className="flex-1 flex flex-col overflow-hidden bg-background">
-      <PageEditor />
-    </main>
-  )
-}
 
 export default function DashboardPage() {
   const [loading, setLoading] = useState(true)
@@ -60,11 +51,9 @@ export default function DashboardPage() {
   if (!user) return null
 
   return (
-    <PageProvider>
-      <div className="flex h-screen overflow-hidden">
-        <Sidebar />
-        <MainContent />
-      </div>
-    </PageProvider>
+    <div className="flex h-screen overflow-hidden">
+      <Sidebar />
+      <PageEditor />
+    </div>
   )
 }

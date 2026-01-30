@@ -1,28 +1,24 @@
 'use client'
 
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
 import { usePageContext } from '@/contexts/PageContext'
-import { getPage, updatePage, createPage } from '@/lib/supabase/pages'
-import { Button } from '@/components/ui/button'
+import { getPage, updatePage } from '@/lib/supabase/pages'
 
-interface PageEditorProps {
-  onSave?: () => void
-}
+const DEBOUNCE_MS = 1000
 
-export default function PageEditor({ onSave }: PageEditorProps) {
+export default function PageEditor() {
+  const { selectedPageId } = usePageContext()
   const [title, setTitle] = useState('')
-  const [isSaving, setIsSaving] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
-  const { selectedPageId, setSelectedPageId, refreshPages } = usePageContext()
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle')
+  const saveStatusTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const editor = useEditor({
     extensions: [
-      StarterKit.configure({
-        heading: { levels: [1, 2, 3] },
-      }),
+      StarterKit.configure({ heading: { levels: [1, 2, 3] } }),
       Placeholder.configure({ placeholder: '내용을 입력하세요...' }),
     ],
     immediatelyRender: false,
@@ -30,10 +26,31 @@ export default function PageEditor({ onSave }: PageEditorProps) {
     editorProps: {
       attributes: {
         class:
-          'prose prose-lg dark:prose-invert max-w-none focus:outline-none min-h-[420px] leading-relaxed',
+          'prose prose-lg dark:prose-invert max-w-none focus:outline-none min-h-[420px] leading-relaxed px-0',
       },
     },
   })
+
+  const persist = useCallback(async () => {
+    if (!selectedPageId) return
+    setSaveStatus('saving')
+    try {
+      const html = editor?.getHTML() ?? null
+      await updatePage(selectedPageId, {
+        title: title.trim() || '제목 없음',
+        content: html ? { content: html } : null,
+      })
+      setSaveStatus('saved')
+      if (saveStatusTimeoutRef.current) clearTimeout(saveStatusTimeoutRef.current)
+      saveStatusTimeoutRef.current = setTimeout(() => {
+        setSaveStatus('idle')
+        saveStatusTimeoutRef.current = null
+      }, 2000)
+    } catch (error) {
+      console.error('Error saving page:', error)
+      setSaveStatus('idle')
+    }
+  }, [selectedPageId, title, editor])
 
   useEffect(() => {
     const load = async () => {
@@ -42,7 +59,7 @@ export default function PageEditor({ onSave }: PageEditorProps) {
       try {
         const page = await getPage(selectedPageId)
         if (page) {
-          setTitle(page.title)
+          setTitle(page.title ?? '')
           if (page.content != null) {
             try {
               const c = page.content
@@ -53,7 +70,7 @@ export default function PageEditor({ onSave }: PageEditorProps) {
               editor.commands.setContent('')
             }
           } else {
-            editor.commands.clearContent()
+            editor.commands.setContent('')
           }
         }
       } catch (error) {
@@ -72,72 +89,69 @@ export default function PageEditor({ onSave }: PageEditorProps) {
     }
   }, [selectedPageId, editor])
 
-  const handleSave = useCallback(async () => {
-    if (!title.trim() && !editor?.getText().trim()) {
-      alert('제목 또는 내용을 입력해주세요.')
-      return
+  const contentDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    if (!selectedPageId) return
+    const t = setTimeout(() => persist(), DEBOUNCE_MS)
+    return () => clearTimeout(t)
+  }, [selectedPageId, title, persist])
+
+  useEffect(() => {
+    if (!editor || !selectedPageId) return
+    const handler = () => {
+      if (contentDebounceRef.current) clearTimeout(contentDebounceRef.current)
+      contentDebounceRef.current = setTimeout(() => {
+        contentDebounceRef.current = null
+        persist()
+      }, DEBOUNCE_MS)
     }
-
-    setIsSaving(true)
-    try {
-      const content = editor?.getHTML() ?? null
-
-      if (selectedPageId) {
-        await updatePage(selectedPageId, {
-          title: title.trim() || '제목 없음',
-          content: content ? { content } : null,
-        })
-      } else {
-        const newPage = await createPage(title.trim() || '제목 없음', null, content ? { content } : null)
-        setSelectedPageId(newPage.id)
-        refreshPages()
-      }
-
-      const toast = document.createElement('div')
-      toast.className =
-        'fixed top-4 right-4 bg-green-500 text-white px-6 py-3 rounded-lg shadow-lg z-50'
-      toast.textContent = '저장되었습니다'
-      document.body.appendChild(toast)
-      setTimeout(() => {
-        toast.style.opacity = '0'
-        toast.style.transition = 'opacity 0.3s'
-        setTimeout(() => document.body.removeChild(toast), 300)
-      }, 2000)
-
-      if (!selectedPageId) {
-        setTitle('')
-        editor?.commands.clearContent()
-      }
-      onSave?.()
-    } catch (error: unknown) {
-      console.error('Error saving page:', error)
-      alert(error instanceof Error ? error.message : '저장에 실패했습니다.')
-    } finally {
-      setIsSaving(false)
+    editor.on('update', handler)
+    return () => {
+      editor.off('update', handler)
+      if (contentDebounceRef.current) clearTimeout(contentDebounceRef.current)
     }
-  }, [title, editor, selectedPageId, setSelectedPageId, refreshPages, onSave])
+  }, [editor, selectedPageId, persist])
+
+  const onTitleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setTitle(e.target.value)
+  }
+
+  if (selectedPageId == null) {
+    return (
+      <main className="flex-1 flex flex-col overflow-hidden bg-background">
+        <div className="flex-1 flex items-center justify-center text-slate-500">
+          <p className="text-base">페이지를 선택하거나 새로 만드세요</p>
+        </div>
+      </main>
+    )
+  }
 
   return (
-    <div className="h-full flex flex-col bg-background">
-      <div className="px-6 py-4 border-b border-border/50 flex items-center gap-3">
-        <input
-          type="text"
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          placeholder="제목 없음"
-          className="flex-1 text-2xl font-semibold bg-transparent border-none outline-none placeholder:text-muted-foreground"
-        />
-        <Button onClick={handleSave} disabled={isSaving || isLoading}>
-          {isSaving ? '저장 중...' : '저장'}
-        </Button>
+    <main className="flex-1 flex flex-col overflow-hidden bg-background">
+      <div className="relative flex-1 flex flex-col overflow-y-auto">
+        <div className="sticky top-0 z-10 flex items-start justify-end px-6 py-2 bg-background/95 backdrop-blur border-b border-border/50">
+          <span className="text-xs text-slate-500">
+            {saveStatus === 'saving' && '저장 중...'}
+            {saveStatus === 'saved' && '저장됨'}
+          </span>
+        </div>
+
+        <div className="max-w-3xl mx-auto w-full px-6 py-8">
+          <input
+            type="text"
+            value={title}
+            onChange={onTitleChange}
+            placeholder="제목 없음"
+            className="w-full text-4xl font-bold bg-transparent border-none outline-none placeholder:text-slate-400 text-slate-900 dark:text-slate-100 py-2 mb-4"
+          />
+          {isLoading ? (
+            <div className="text-slate-500 text-sm">불러오는 중...</div>
+          ) : (
+            <EditorContent editor={editor} />
+          )}
+        </div>
       </div>
-      <div className="flex-1 overflow-y-auto px-6 py-4">
-        {isLoading ? (
-          <div className="text-muted-foreground">불러오는 중...</div>
-        ) : (
-          <EditorContent editor={editor} />
-        )}
-      </div>
-    </div>
+    </main>
   )
 }

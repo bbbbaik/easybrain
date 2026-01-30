@@ -1,14 +1,17 @@
 'use client'
 
-import { createContext, useContext, useState, useCallback } from 'react'
+import { createContext, useContext, useState, useCallback, useEffect } from 'react'
+import { getPages, buildPageTree } from '@/lib/supabase/pages'
 import type { Page } from '@/types/page.types'
+import type { PageNode } from '@/types/page.types'
 
 interface PageContextType {
+  pages: Page[]
+  pageTree: PageNode[]
   selectedPageId: string | null
-  setSelectedPageId: (pageId: string | null) => void
-  /** 페이지 트리 갱신 요청 (Sidebar/PageTree에서 호출) */
-  refreshPages: () => void
-  refreshTrigger: number
+  isLoading: boolean
+  refreshPages: () => Promise<void>
+  selectPage: (id: string | null) => void
 }
 
 const PageContext = createContext<PageContextType | undefined>(undefined)
@@ -21,21 +24,45 @@ export function usePageContext() {
   return context
 }
 
-export function PageProvider({ children }: { children: React.ReactNode }) {
-  const [selectedPageId, setSelectedPageId] = useState<string | null>(null)
-  const [refreshTrigger, setRefreshTrigger] = useState(0)
+/** usePageContext 의 별칭 (다른 컴포넌트에서 쉽게 사용) */
+export const usePage = usePageContext
 
-  const refreshPages = useCallback(() => {
-    setRefreshTrigger((n) => n + 1)
+export function PageProvider({ children }: { children: React.ReactNode }) {
+  const [pages, setPages] = useState<Page[]>([])
+  const [pageTree, setPageTree] = useState<PageNode[]>([])
+  const [selectedPageId, setSelectedPageId] = useState<string | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
+
+  const refreshPages = useCallback(async () => {
+    setIsLoading(true)
+    try {
+      const list = await getPages()
+      setPages(list)
+      setPageTree(buildPageTree(list))
+    } catch (error) {
+      console.error('Error refreshing pages:', error)
+    } finally {
+      setIsLoading(false)
+    }
   }, [])
+
+  const selectPage = useCallback((id: string | null) => {
+    setSelectedPageId(id)
+  }, [])
+
+  useEffect(() => {
+    refreshPages()
+  }, [refreshPages])
 
   return (
     <PageContext.Provider
       value={{
+        pages,
+        pageTree,
         selectedPageId,
-        setSelectedPageId,
+        isLoading,
         refreshPages,
-        refreshTrigger,
+        selectPage,
       }}
     >
       {children}

@@ -1,86 +1,88 @@
 'use client'
 
-import { createClient } from '@/lib/supabase/client'
-import { useRouter } from 'next/navigation'
-import { useState, useEffect, useCallback } from 'react'
+import { useCallback } from 'react'
 import { DragDropContext, type DropResult } from '@hello-pangea/dnd'
+import { Brain, Plus } from 'lucide-react'
 import { usePageContext } from '@/contexts/PageContext'
 import {
-  getAllPages,
-  buildPageTree,
+  reorderPages,
+  createPage,
   getOrderedIdsForDroppable,
-  arrayMove,
-  updatePage,
-  updatePagePositions,
+  type ReorderUpdate,
 } from '@/lib/supabase/pages'
-import type { PageNode } from '@/types/page.types'
-import { PageTreeRoot } from './PageTree'
+import { PageTree } from './PageTree'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
 
+function arrayMove<T>(arr: T[], fromIndex: number, toIndex: number): T[] {
+  const next = [...arr]
+  const [removed] = next.splice(fromIndex, 1)
+  next.splice(toIndex, 0, removed)
+  return next
+}
+
 export default function Sidebar() {
-  const [user, setUser] = useState<{ email?: string } | null>(null)
-  const [rootNodes, setRootNodes] = useState<PageNode[]>([])
-  const { refreshPages, refreshTrigger } = usePageContext()
-  const router = useRouter()
-  const supabase = createClient()
-
-  useEffect(() => {
-    const u = async () => {
-      const { data: { user: uu } } = await supabase.auth.getUser()
-      setUser(uu ?? null)
-    }
-    u()
-  }, [supabase])
-
-  useEffect(() => {
-    const load = async () => {
-      const pages = await getAllPages()
-      const tree = buildPageTree(pages)
-      setRootNodes(tree)
-    }
-    load()
-  }, [refreshTrigger])
+  const { pageTree, refreshPages } = usePageContext()
 
   const onDragEnd = useCallback(
     async (result: DropResult) => {
       const { source, destination, draggableId } = result
       if (!destination) return
 
-      const sourceParentId = source.droppableId === 'root' ? null : source.droppableId.replace(/^page-/, '')
-      const destParentId = destination.droppableId === 'root' ? null : destination.droppableId.replace(/^page-/, '')
+      const sourceDroppableId = source.droppableId
+      const destDroppableId = destination.droppableId
+      const sourceParentId = sourceDroppableId === 'list-root' ? null : sourceDroppableId.replace(/^list-/, '')
+      const destParentId = destDroppableId === 'list-root' ? null : destDroppableId.replace(/^list-/, '')
 
-      const sourceIds = getOrderedIdsForDroppable(source.droppableId, rootNodes)
-      const destIds = getOrderedIdsForDroppable(destination.droppableId, rootNodes)
+      const sourceIds = getOrderedIdsForDroppable(sourceDroppableId, pageTree)
+      const destIds = getOrderedIdsForDroppable(destDroppableId, pageTree)
 
-      if (source.droppableId === destination.droppableId) {
+      let updates: ReorderUpdate[] = []
+
+      if (sourceDroppableId === destDroppableId) {
         const newOrder = arrayMove(sourceIds, source.index, destination.index)
-        await updatePagePositions(sourceParentId, newOrder)
+        updates = newOrder.map((id, i) => ({
+          id,
+          parent_id: sourceParentId,
+          position: i,
+        }))
       } else {
-        await updatePage(draggableId, { parent_id: destParentId })
         const sourceWithout = sourceIds.filter((id) => id !== draggableId)
         const destWith = [...destIds]
         destWith.splice(destination.index, 0, draggableId)
-        await updatePagePositions(sourceParentId, sourceWithout)
-        await updatePagePositions(destParentId, destWith)
+        updates = [
+          ...sourceWithout.map((id, i) => ({ id, parent_id: sourceParentId, position: i })),
+          ...destWith.map((id, i) => ({ id, parent_id: destParentId, position: i })),
+        ]
       }
-      refreshPages()
+
+      try {
+        await reorderPages(updates)
+        await refreshPages()
+      } catch (error) {
+        console.error('Error reordering pages:', error)
+      }
     },
-    [rootNodes, refreshPages]
+    [pageTree, refreshPages]
   )
 
-  const handleLogout = async () => {
-    await supabase.auth.signOut()
-    router.push('/')
-    router.refresh()
-  }
+  const handleAddPage = useCallback(async () => {
+    try {
+      await createPage('제목 없음', null)
+      await refreshPages()
+    } catch (error) {
+      console.error('Error creating page:', error)
+    }
+  }, [refreshPages])
 
   return (
     <aside className="w-64 flex flex-col h-full bg-slate-50 border-r border-slate-200 rounded-r-lg shadow-sm">
       <div className="p-4 shrink-0">
-        <h2 className="text-base font-semibold text-slate-900 tracking-tight">EasyBrain</h2>
-        {user && <p className="text-xs text-slate-500 mt-1 truncate">{user.email}</p>}
+        <div className="flex items-center gap-2">
+          <Brain size={20} className="text-slate-700 shrink-0" />
+          <h2 className="text-base font-semibold text-slate-900 tracking-tight">EasyBrain</h2>
+        </div>
       </div>
 
       <Separator className="bg-slate-200" />
@@ -91,7 +93,7 @@ export default function Sidebar() {
             <h3 className="text-[11px] font-medium uppercase tracking-wider text-slate-500 mb-2 px-2">
               페이지
             </h3>
-            <PageTreeRoot nodes={rootNodes} />
+            <PageTree pages={pageTree} parentId={null} depth={0} />
           </div>
         </DragDropContext>
       </ScrollArea>
@@ -100,12 +102,13 @@ export default function Sidebar() {
 
       <div className="p-3 shrink-0">
         <Button
-          variant="ghost"
+          variant="outline"
           size="sm"
-          className="w-full justify-start rounded-lg text-slate-700 hover:text-slate-900 hover:bg-slate-100 transition-colors"
-          onClick={handleLogout}
+          className="w-full justify-start gap-2 rounded-lg text-slate-700 hover:bg-slate-100 border-slate-200"
+          onClick={handleAddPage}
         >
-          로그아웃
+          <Plus size={16} />
+          새 페이지 추가
         </Button>
       </div>
     </aside>

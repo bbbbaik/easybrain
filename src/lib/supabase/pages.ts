@@ -2,35 +2,8 @@ import { createClient } from '@/lib/supabase/client'
 import type { Page } from '@/types/page.types'
 import type { PageNode } from '@/types/page.types'
 
-/** 평면 목록 조회 (parent_id 기준, null 이면 최상위) */
-export async function getPages(parentId: string | null): Promise<Page[]> {
-  const supabase = createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-  if (!user) return []
-
-  let query = supabase
-    .from('pages')
-    .select('*')
-    .eq('user_id', user.id)
-
-  if (parentId === null) {
-    query = query.is('parent_id', null)
-  } else {
-    query = query.eq('parent_id', parentId)
-  }
-
-  const { data, error } = await query.order('position', { ascending: true }).order('created_at', { ascending: true })
-  if (error) {
-    console.error('Error fetching pages:', error)
-    return []
-  }
-  return (data || []) as Page[]
-}
-
-/** 사용자의 모든 페이지를 한 번에 조회 (트리 빌드용) */
-export async function getAllPages(): Promise<Page[]> {
+/** 로그인한 유저의 모든 페이지 조회 (position 순 정렬) */
+export async function getPages(): Promise<Page[]> {
   const supabase = createClient()
   const {
     data: { user },
@@ -45,7 +18,7 @@ export async function getAllPages(): Promise<Page[]> {
     .order('created_at', { ascending: true })
 
   if (error) {
-    console.error('Error fetching all pages:', error)
+    console.error('Error fetching pages:', error)
     return []
   }
   return (data || []) as Page[]
@@ -60,32 +33,6 @@ export function buildPageTree(pages: Page[], parentId: string | null = null): Pa
       ...page,
       children: buildPageTree(pages, page.id),
     }))
-}
-
-/** 트리에서 id 로 노드 찾기 */
-export function findPageNode(nodes: PageNode[], id: string): PageNode | null {
-  for (const n of nodes) {
-    if (n.id === id) return n
-    const found = findPageNode(n.children, id)
-    if (found) return found
-  }
-  return null
-}
-
-/** droppableId 에 해당하는 목록의 ordered ids (DnD 시 사용) */
-export function getOrderedIdsForDroppable(droppableId: string, rootNodes: PageNode[]): string[] {
-  if (droppableId === 'root') return rootNodes.map((n) => n.id)
-  const pageId = droppableId.replace(/^page-/, '')
-  const node = findPageNode(rootNodes, pageId)
-  return node ? node.children.map((c) => c.id) : []
-}
-
-/** 배열에서 fromIndex 항목을 toIndex 로 이동 */
-export function arrayMove<T>(arr: T[], fromIndex: number, toIndex: number): T[] {
-  const next = [...arr]
-  const [removed] = next.splice(fromIndex, 1)
-  next.splice(toIndex, 0, removed)
-  return next
 }
 
 /** 단일 페이지 조회 */
@@ -107,11 +54,11 @@ export async function getPage(pageId: string): Promise<Page | null> {
   return data as Page
 }
 
-/** 페이지 생성 */
+/** 새 페이지 생성 (icon 기본 null) */
 export async function createPage(
   title: string,
   parentId: string | null = null,
-  content: unknown = null
+  content: any = null
 ): Promise<Page> {
   const supabase = createClient()
   const {
@@ -135,6 +82,7 @@ export async function createPage(
       user_id: user.id,
       parent_id: parentId,
       title: title || '제목 없음',
+      icon: null,
       content,
       position,
     })
@@ -145,10 +93,10 @@ export async function createPage(
   return data as Page
 }
 
-/** 페이지 수정 (title, content, position, parent_id 등) */
+/** 페이지 수정 (title, icon, content 등) */
 export async function updatePage(
   pageId: string,
-  updates: Partial<Pick<Page, 'title' | 'content' | 'icon' | 'position' | 'parent_id'>>
+  updates: Partial<Pick<Page, 'title' | 'icon' | 'content' | 'position' | 'parent_id'>>
 ): Promise<Page> {
   const supabase = createClient()
   const { data, error } = await supabase
@@ -162,11 +110,41 @@ export async function updatePage(
   return data as Page
 }
 
-/** 같은 부모 내 순서 변경: orderedIds 순서대로 position 0,1,2,... */
-export async function updatePagePositions(parentId: string | null, orderedIds: string[]): Promise<void> {
+/** 페이지 삭제 */
+export async function deletePage(pageId: string): Promise<void> {
   const supabase = createClient()
-  for (let i = 0; i < orderedIds.length; i++) {
-    const { error } = await supabase.from('pages').update({ position: i }).eq('id', orderedIds[i])
+  const { error } = await supabase.from('pages').delete().eq('id', pageId)
+  if (error) throw error
+}
+
+/** 트리에서 id 로 노드 찾기 (DnD 시 부모/자식 목록 계산용) */
+export function findPageNode(nodes: PageNode[], id: string): PageNode | null {
+  for (const n of nodes) {
+    if (n.id === id) return n
+    const found = findPageNode(n.children, id)
+    if (found) return found
+  }
+  return null
+}
+
+/** droppableId 에 해당하는 목록의 ordered ids (list-root 또는 list-{pageId}) */
+export function getOrderedIdsForDroppable(droppableId: string, rootNodes: PageNode[]): string[] {
+  if (droppableId === 'list-root') return rootNodes.map((n) => n.id)
+  const pageId = droppableId.replace(/^list-/, '')
+  const node = findPageNode(rootNodes, pageId)
+  return node ? node.children.map((c) => c.id) : []
+}
+
+/** 드래그 앤 드롭 후 여러 페이지의 parent_id, position 한 번에 업데이트 */
+export type ReorderUpdate = { id: string; parent_id: string | null; position: number }
+
+export async function reorderPages(updates: ReorderUpdate[]): Promise<void> {
+  const supabase = createClient()
+  for (const u of updates) {
+    const { error } = await supabase
+      .from('pages')
+      .update({ parent_id: u.parent_id, position: u.position })
+      .eq('id', u.id)
     if (error) throw error
   }
 }
