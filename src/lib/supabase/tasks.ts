@@ -11,6 +11,7 @@ export interface Task {
   is_completed: boolean
   is_important: boolean
   due_date: string | null
+  position: number
   created_at: string
   updated_at: string
   completed_at: string | null
@@ -52,6 +53,7 @@ export async function updateTask(
     title?: string
     content?: string | null
     folder_id?: string | null
+    position?: number
   }
 ) {
   const supabase = createClient()
@@ -64,6 +66,21 @@ export async function updateTask(
 
   if (error) throw error
   return data as Task
+}
+
+/** Same-folder reorder: update position for each task in order (Optimistic UI 후 호출) */
+export async function updateTaskPositions(
+  folderId: string | null,
+  orderedTaskIds: string[]
+): Promise<void> {
+  const supabase = createClient()
+  for (let i = 0; i < orderedTaskIds.length; i++) {
+    const { error } = await supabase
+      .from('tasks')
+      .update({ position: i })
+      .eq('id', orderedTaskIds[i])
+    if (error) throw error
+  }
 }
 
 export async function getTasks(folderId?: string | null) {
@@ -82,7 +99,7 @@ export async function getTasks(folderId?: string | null) {
     query = query.is('folder_id', null)
   }
 
-  const { data, error } = await query.order('created_at', { ascending: false })
+  const { data, error } = await query.order('position', { ascending: true }).order('created_at', { ascending: true })
 
   if (error) {
     console.error('Error fetching tasks:', error)

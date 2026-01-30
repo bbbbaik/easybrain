@@ -4,8 +4,9 @@ import { useState, useCallback, useEffect } from 'react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
-import { useFolderContext } from '@/contexts/FolderContext'
+import { useFolderContext, folderKey } from '@/contexts/FolderContext'
 import { createTask, updateTask, getTask } from '@/lib/supabase/tasks'
+import { Button } from '@/components/ui/button'
 
 interface TaskEditorProps {
   onSave?: () => void
@@ -15,7 +16,7 @@ export default function TaskEditor({ onSave }: TaskEditorProps) {
   const [title, setTitle] = useState('')
   const [isSaving, setIsSaving] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
-  const { selectedFolderId, selectedTaskId, setSelectedTaskId } = useFolderContext()
+  const { selectedFolderId, selectedTaskId, setSelectedTaskId, addTaskToFolder } = useFolderContext()
 
   const editor = useEditor({
     extensions: [
@@ -32,7 +33,7 @@ export default function TaskEditor({ onSave }: TaskEditorProps) {
     content: '',
     editorProps: {
       attributes: {
-        class: 'prose prose-sm sm:prose lg:prose-lg xl:prose-xl mx-auto focus:outline-none min-h-[400px] px-4 py-8',
+        class: 'prose prose-lg dark:prose-invert max-w-none focus:outline-none min-h-[420px] leading-relaxed',
       },
     },
   })
@@ -88,8 +89,13 @@ export default function TaskEditor({ onSave }: TaskEditorProps) {
           folder_id: selectedFolderId || null,
         })
       } else {
-        // 새로 만들기 모드
-        await createTask(title.trim() || '제목 없음', content, selectedFolderId || null)
+        // 새로 만들기 모드: DB 저장 후 현재 폴더 목록에 즉시 반영 (낙관적 업데이트)
+        const newTask = await createTask(
+          title.trim() || '제목 없음',
+          content,
+          selectedFolderId || null
+        )
+        addTaskToFolder(folderKey(selectedFolderId), newTask)
       }
 
       // 성공 알림
@@ -122,51 +128,53 @@ export default function TaskEditor({ onSave }: TaskEditorProps) {
     } finally {
       setIsSaving(false)
     }
-  }, [title, editor, selectedFolderId, selectedTaskId, onSave])
+  }, [title, editor, selectedFolderId, selectedTaskId, onSave, addTaskToFolder])
 
   return (
-    <div className="h-full flex flex-col">
-      {/* 저장 버튼 */}
-      <div className="flex justify-between items-center p-4 border-b border-gray-200 dark:border-gray-700">
+    <div className="h-full flex flex-col bg-background">
+      {/* 툴바 */}
+      <div className="flex justify-between items-center px-6 py-3 border-b border-border/50 bg-muted/30">
         {selectedTaskId && (
-          <button
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-muted-foreground hover:text-foreground -ml-2"
             onClick={() => {
               setSelectedTaskId(null)
               setTitle('')
               editor?.commands.clearContent()
             }}
-            className="px-3 py-1.5 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200"
           >
             ← 새 글 작성
-          </button>
+          </Button>
         )}
-        <div className="flex-1"></div>
-        <button
+        <div className="flex-1" />
+        <Button
           onClick={handleSave}
           disabled={isSaving || isLoading}
-          className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm font-medium"
+          size="sm"
+          className="shrink-0"
         >
           {isSaving ? '저장 중...' : isLoading ? '로딩 중...' : '저장'}
-        </button>
+        </Button>
       </div>
 
-      {/* 에디터 영역 */}
+      {/* 에디터 영역 - 노션 스타일: 테두리 없음, 여백·폰트 조정 */}
       <div className="flex-1 overflow-y-auto">
-        {/* 제목 입력 */}
-        <div className="px-8 pt-8 pb-4">
+        <div className="max-w-3xl mx-auto px-6 sm:px-10 py-10">
+          {/* 제목: 테두리 없음, 큰 폰트, 여백만 */}
           <input
             type="text"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder="제목 없음"
-            className="w-full text-4xl font-bold bg-transparent border-none outline-none text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:ring-0 focus:outline-none"
-            style={{ fontSize: '2.5rem', lineHeight: '1.2' }}
+            className="w-full bg-transparent border-0 outline-none text-foreground placeholder:text-muted-foreground focus:ring-0 focus:outline-none text-[2rem] sm:text-[2.25rem] font-bold leading-tight tracking-tight mb-2"
           />
-        </div>
 
-        {/* Tiptap 에디터 */}
-        <div className="px-8 pb-8">
-          <EditorContent editor={editor} />
+          {/* 본문: Tiptap - 테두리 없음, 글쓰기 집중 */}
+          <div className="mt-6 [&_.ProseMirror]:outline-none [&_.ProseMirror]:min-h-[380px] [&_.ProseMirror]:text-[1.0625rem] [&_.ProseMirror]:leading-[1.75] [&_.ProseMirror]:text-foreground">
+            <EditorContent editor={editor} />
+          </div>
         </div>
       </div>
 
@@ -180,7 +188,7 @@ export default function TaskEditor({ onSave }: TaskEditorProps) {
         .ProseMirror p.is-editor-empty:first-child::before {
           content: attr(data-placeholder);
           float: left;
-          color: #9ca3af;
+          color: hsl(var(--muted-foreground));
           pointer-events: none;
           height: 0;
         }
@@ -188,23 +196,27 @@ export default function TaskEditor({ onSave }: TaskEditorProps) {
           margin: 0.5em 0;
         }
         .ProseMirror h1 {
-          font-size: 2em;
-          font-weight: bold;
-          margin: 0.67em 0;
+          font-size: 1.875em;
+          font-weight: 700;
+          margin: 1em 0 0.5em;
+          line-height: 1.3;
         }
         .ProseMirror h2 {
           font-size: 1.5em;
-          font-weight: bold;
-          margin: 0.75em 0;
+          font-weight: 600;
+          margin: 0.9em 0 0.4em;
+          line-height: 1.35;
         }
         .ProseMirror h3 {
-          font-size: 1.17em;
-          font-weight: bold;
-          margin: 0.83em 0;
+          font-size: 1.25em;
+          font-weight: 600;
+          margin: 0.8em 0 0.35em;
+          line-height: 1.4;
         }
         .ProseMirror ul,
         .ProseMirror ol {
-          padding-left: 1.5em;
+          padding-left: 1.625em;
+          margin: 0.6em 0;
         }
         .ProseMirror ul {
           list-style-type: disc;
@@ -213,33 +225,28 @@ export default function TaskEditor({ onSave }: TaskEditorProps) {
           list-style-type: decimal;
         }
         .ProseMirror blockquote {
-          border-left: 4px solid #e5e7eb;
+          border-left: 4px solid hsl(var(--border));
           padding-left: 1em;
           margin: 1em 0;
-          color: #6b7280;
+          color: hsl(var(--muted-foreground));
         }
         .ProseMirror code {
-          background-color: #f3f4f6;
-          padding: 0.2em 0.4em;
+          background: hsl(var(--muted));
+          padding: 0.2em 0.35em;
           border-radius: 0.25rem;
-          font-family: monospace;
+          font-size: 0.9em;
+          font-family: ui-monospace, monospace;
         }
         .ProseMirror pre {
-          background-color: #1f2937;
-          color: #f9fafb;
+          background: hsl(var(--muted));
           padding: 1em;
           border-radius: 0.5rem;
           overflow-x: auto;
+          margin: 1em 0;
         }
         .ProseMirror pre code {
-          background-color: transparent;
+          background: transparent;
           padding: 0;
-        }
-        .dark .ProseMirror code {
-          background-color: #374151;
-        }
-        .dark .ProseMirror blockquote {
-          border-left-color: #4b5563;
         }
       `}</style>
     </div>

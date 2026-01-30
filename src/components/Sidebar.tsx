@@ -2,26 +2,73 @@
 
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
-import { useState, useEffect } from 'react'
-import { useFolderContext } from '@/contexts/FolderContext'
-import CategoryTree from './CategoryTree'
-import TaskList from './TaskList'
+import { useState, useEffect, useCallback } from 'react'
+import { DragDropContext, type DropResult } from '@hello-pangea/dnd'
+import { usePageContext } from '@/contexts/PageContext'
+import {
+  getAllPages,
+  buildPageTree,
+  getOrderedIdsForDroppable,
+  arrayMove,
+  updatePage,
+  updatePagePositions,
+} from '@/lib/supabase/pages'
+import type { PageNode } from '@/types/page.types'
+import { PageTreeRoot } from './PageTree'
+import { Button } from '@/components/ui/button'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import { Separator } from '@/components/ui/separator'
 
 export default function Sidebar() {
-  const [user, setUser] = useState<any>(null)
-  const { selectedFolderId, setSelectedFolder, selectedTaskId, setSelectedTaskId } = useFolderContext()
+  const [user, setUser] = useState<{ email?: string } | null>(null)
+  const [rootNodes, setRootNodes] = useState<PageNode[]>([])
+  const { refreshPages, refreshTrigger } = usePageContext()
   const router = useRouter()
   const supabase = createClient()
 
   useEffect(() => {
-    const getUser = async () => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
-      setUser(user)
+    const u = async () => {
+      const { data: { user: uu } } = await supabase.auth.getUser()
+      setUser(uu ?? null)
     }
-    getUser()
+    u()
   }, [supabase])
+
+  useEffect(() => {
+    const load = async () => {
+      const pages = await getAllPages()
+      const tree = buildPageTree(pages)
+      setRootNodes(tree)
+    }
+    load()
+  }, [refreshTrigger])
+
+  const onDragEnd = useCallback(
+    async (result: DropResult) => {
+      const { source, destination, draggableId } = result
+      if (!destination) return
+
+      const sourceParentId = source.droppableId === 'root' ? null : source.droppableId.replace(/^page-/, '')
+      const destParentId = destination.droppableId === 'root' ? null : destination.droppableId.replace(/^page-/, '')
+
+      const sourceIds = getOrderedIdsForDroppable(source.droppableId, rootNodes)
+      const destIds = getOrderedIdsForDroppable(destination.droppableId, rootNodes)
+
+      if (source.droppableId === destination.droppableId) {
+        const newOrder = arrayMove(sourceIds, source.index, destination.index)
+        await updatePagePositions(sourceParentId, newOrder)
+      } else {
+        await updatePage(draggableId, { parent_id: destParentId })
+        const sourceWithout = sourceIds.filter((id) => id !== draggableId)
+        const destWith = [...destIds]
+        destWith.splice(destination.index, 0, draggableId)
+        await updatePagePositions(sourceParentId, sourceWithout)
+        await updatePagePositions(destParentId, destWith)
+      }
+      refreshPages()
+    },
+    [rootNodes, refreshPages]
+  )
 
   const handleLogout = async () => {
     await supabase.auth.signOut()
@@ -29,53 +76,37 @@ export default function Sidebar() {
     router.refresh()
   }
 
-  const handleSelectFolder = (folderId: string | null, folderName: string | null) => {
-    setSelectedFolder(folderId, folderName)
-  }
-
-  const handleSelectTask = (taskId: string) => {
-    setSelectedTaskId(taskId)
-  }
-
   return (
-    <aside className="w-64 bg-gray-100 dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col">
-      <div className="p-4 border-b border-gray-200 dark:border-gray-700">
-        <h2 className="text-xl font-bold text-gray-900 dark:text-white">EasyBrain</h2>
-        {user && (
-          <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">{user.email}</p>
-        )}
+    <aside className="w-64 flex flex-col h-full bg-slate-50 border-r border-slate-200 rounded-r-lg shadow-sm">
+      <div className="p-4 shrink-0">
+        <h2 className="text-base font-semibold text-slate-900 tracking-tight">EasyBrain</h2>
+        {user && <p className="text-xs text-slate-500 mt-1 truncate">{user.email}</p>}
       </div>
-      <nav className="flex-1 overflow-y-auto p-4">
-        <div className="mb-4">
-          <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">
-            카테고리 & 폴더
-          </h3>
-          <CategoryTree
-            selectedFolderId={selectedFolderId}
-            selectedTaskId={selectedTaskId}
-            onSelectFolder={handleSelectFolder}
-            onSelectTask={handleSelectTask}
-          />
-        </div>
-        {/* Inbox (folder_id가 null인 Task들) */}
-        <div className="mb-4">
-          <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">
-            Inbox
-          </h3>
-          <TaskList
-            folderId={null}
-            selectedTaskId={selectedTaskId}
-            onSelectTask={handleSelectTask}
-          />
-        </div>
-      </nav>
-      <div className="p-4 border-t border-gray-200 dark:border-gray-700">
-        <button
+
+      <Separator className="bg-slate-200" />
+
+      <ScrollArea className="flex-1 px-3 py-3">
+        <DragDropContext onDragEnd={onDragEnd}>
+          <div className="space-y-2">
+            <h3 className="text-[11px] font-medium uppercase tracking-wider text-slate-500 mb-2 px-2">
+              페이지
+            </h3>
+            <PageTreeRoot nodes={rootNodes} />
+          </div>
+        </DragDropContext>
+      </ScrollArea>
+
+      <Separator className="bg-slate-200" />
+
+      <div className="p-3 shrink-0">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="w-full justify-start rounded-lg text-slate-700 hover:text-slate-900 hover:bg-slate-100 transition-colors"
           onClick={handleLogout}
-          className="w-full px-4 py-2 text-left rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700"
         >
           로그아웃
-        </button>
+        </Button>
       </div>
     </aside>
   )

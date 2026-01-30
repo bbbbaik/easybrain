@@ -55,6 +55,25 @@ export async function getFolders(categoryId?: string | null, parentId?: string |
   return (data || []) as Folder[]
 }
 
+export async function getFolder(folderId: string): Promise<Folder | null> {
+  const supabase = createClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+
+  if (!user) return null
+
+  const { data, error } = await supabase
+    .from('folders')
+    .select('*')
+    .eq('id', folderId)
+    .eq('user_id', user.id)
+    .single()
+
+  if (error) return null
+  return data as Folder
+}
+
 export async function createCategory(name: string, color?: string) {
   const supabase = createClient()
   const {
