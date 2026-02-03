@@ -96,7 +96,7 @@ export async function createPage(
 /** 페이지 수정 (title, icon, content 등) */
 export async function updatePage(
   pageId: string,
-  updates: Partial<Pick<Page, 'title' | 'icon' | 'content' | 'position' | 'parent_id'>>
+  updates: Partial<Pick<Page, 'title' | 'icon' | 'cover_image' | 'content' | 'position' | 'parent_id'>>
 ): Promise<Page> {
   const supabase = createClient()
   const { data, error } = await supabase

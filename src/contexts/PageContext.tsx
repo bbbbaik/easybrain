@@ -12,6 +12,7 @@ interface PageContextType {
   isLoading: boolean
   refreshPages: () => Promise<void>
   selectPage: (id: string | null) => void
+  updatePageOptimistically: (updates: Array<{ id: string; parent_id: string | null; position: number }>) => void
 }
 
 const PageContext = createContext<PageContextType | undefined>(undefined)
@@ -50,6 +51,33 @@ export function PageProvider({ children }: { children: React.ReactNode }) {
     setSelectedPageId(id)
   }, [])
 
+  const updatePageOptimistically = useCallback(
+    (updates: Array<{ id: string; parent_id: string | null; position: number }>) => {
+      setPages((prevPages) => {
+        const updated = prevPages.map((page) => {
+          const update = updates.find((u) => u.id === page.id)
+          if (update) {
+            return { ...page, parent_id: update.parent_id, position: update.position }
+          }
+          return page
+        })
+        // 페이지를 parent_id와 position으로 정렬
+        const sorted = updated.sort((a, b) => {
+          if (a.parent_id !== b.parent_id) {
+            const aParent = a.parent_id || ''
+            const bParent = b.parent_id || ''
+            return aParent.localeCompare(bParent)
+          }
+          return a.position - b.position
+        })
+        // 트리 구조 업데이트
+        setPageTree(buildPageTree(sorted))
+        return sorted
+      })
+    },
+    []
+  )
+
   useEffect(() => {
     refreshPages()
   }, [refreshPages])
@@ -63,6 +91,7 @@ export function PageProvider({ children }: { children: React.ReactNode }) {
         isLoading,
         refreshPages,
         selectPage,
+        updatePageOptimistically,
       }}
     >
       {children}

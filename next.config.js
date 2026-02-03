@@ -140,7 +140,7 @@ const withPWA = require('next-pwa')({
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  reactStrictMode: true,
+  reactStrictMode: false, // DnD 라이브러리 호환성을 위해 false로 설정
   images: {
     remotePatterns: [
       {

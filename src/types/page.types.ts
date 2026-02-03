@@ -5,6 +5,7 @@ export interface Page {
   parent_id: string | null
   title: string
   icon: string | null
+  cover_image: string | null
   content: any // JSON (Tiptap 문서 등)
   position: number
   created_at: string

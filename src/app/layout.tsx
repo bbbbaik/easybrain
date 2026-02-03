@@ -1,19 +1,12 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
 import "./globals.css";
 import { Providers } from "@/components/Providers";
-
-const inter = Inter({
-  subsets: ["latin"],
-  display: "swap",
-  variable: "--font-inter",
-});
 
 export const metadata: Metadata = {
   title: "EasyBrain - 세컨드 브레인 Task 관리",
   description: "확장성과 멀티 플랫폼 사용성을 갖춘 Task 관리 서비스",
   manifest: "/manifest.json",
-  themeColor: "#ffffff",
+  themeColor: "#3182F6",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
@@ -33,8 +26,16 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="ko" className={inter.variable}>
-      <body className="font-sans antialiased">
+    <html lang="ko">
+      <head>
+        <link
+          rel="stylesheet"
+          as="style"
+          crossOrigin="anonymous"
+          href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css"
+        />
+      </head>
+      <body className="font-sans antialiased tracking-tight bg-toss-base min-h-screen">
         <Providers>{children}</Providers>
       </body>
     </html>

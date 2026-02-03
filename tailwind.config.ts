@@ -10,15 +10,22 @@ const config: Config = {
   theme: {
   	extend: {
   		fontFamily: {
-  			sans: ['var(--font-inter)', 'system-ui', 'sans-serif'],
+  			sans: ['Pretendard', 'var(--font-pretendard)', '-apple-system', 'BlinkMacSystemFont', 'system-ui', 'sans-serif'],
+  		},
+  		letterSpacing: {
+  			tight: '-0.025em',
   		},
   		colors: {
+  			'toss-base': '#F2F4F6',
+  			'toss-blue': '#3182F6',
+  			'toss-bg': '#F2F4F6',
+  			'toss-text': '#191F28',
+  			'toss-text-muted': '#333D4B',
+  			'toss-gray': '#8B95A1',
+  			'accent-blue': '#3182F6',
+  			'card': { DEFAULT: '#FFFFFF', foreground: '#191F28' },
   			background: 'hsl(var(--background))',
   			foreground: 'hsl(var(--foreground))',
-  			card: {
-  				DEFAULT: 'hsl(var(--card))',
-  				foreground: 'hsl(var(--card-foreground))'
-  			},
   			popover: {
   				DEFAULT: 'hsl(var(--popover))',
   				foreground: 'hsl(var(--popover-foreground))'
