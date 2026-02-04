@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { Providers } from "@/components/Providers";
+import { PostHogProvider } from "@/providers/PostHogProvider";
 
 export const metadata: Metadata = {
   title: "EasyBrain - 세컨드 브레인 Task 관리",
@@ -36,7 +37,11 @@ export default function RootLayout({
         />
       </head>
       <body className="font-sans antialiased tracking-tight bg-toss-base min-h-screen">
-        <Providers>{children}</Providers>
+      <PostHogProvider>
+          <Providers>
+            {children}
+          </Providers>
+        </PostHogProvider>
       </body>
     </html>
   );
