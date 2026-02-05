@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import Sidebar from '@/components/Sidebar'
@@ -10,7 +10,10 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true)
   const [user, setUser] = useState<unknown>(null)
   const router = useRouter()
-  const supabase = createClient()
+  
+  // Supabase 클라이언트를 useRef로 한 번만 생성 (무한 루프 방지)
+  const supabaseRef = useRef(createClient())
+  const supabase = supabaseRef.current
 
   useEffect(() => {
     const checkUser = async () => {
@@ -35,7 +38,8 @@ export default function DashboardPage() {
       else if (event === 'SIGNED_IN' && session) setUser(session.user)
     })
     return () => subscription.unsubscribe()
-  }, [router, supabase.auth])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router]) // router만 dependency에 포함 (supabase는 useRef로 안정적)
 
   if (loading) {
     return (

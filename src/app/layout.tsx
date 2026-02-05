@@ -1,24 +1,25 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { Providers } from "@/components/Providers";
-import { PostHogProvider } from "@/providers/PostHogProvider";
+import { QuickCapture } from "@/components/QuickCapture";
 
 export const metadata: Metadata = {
   title: "EasyBrain - 세컨드 브레인 Task 관리",
   description: "확장성과 멀티 플랫폼 사용성을 갖춘 Task 관리 서비스",
   manifest: "/manifest.json",
-  themeColor: "#3182F6",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
     title: "EasyBrain",
   },
-  viewport: {
-    width: "device-width",
-    initialScale: 1,
-    maximumScale: 1,
-    userScalable: false,
-  },
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  themeColor: "#3182F6",
 };
 
 export default function RootLayout({
@@ -37,11 +38,10 @@ export default function RootLayout({
         />
       </head>
       <body className="font-sans antialiased tracking-tight bg-toss-base min-h-screen">
-      <PostHogProvider>
-          <Providers>
-            {children}
-          </Providers>
-        </PostHogProvider>
+        <Providers>
+          {children}
+          <QuickCapture />
+        </Providers>
       </body>
     </html>
   );

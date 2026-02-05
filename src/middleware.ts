@@ -35,10 +35,26 @@ export async function middleware(request: NextRequest) {
     }
   )
 
-  // 세션 갱신만 수행 (리다이렉트 없음)
-  await supabase.auth.getUser()
+  // 세션 확인
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
 
-  // 모든 요청을 그대로 통과시킴
+  const { pathname } = request.nextUrl
+
+  // 로그인하지 않은 상태로 보호된 경로 접근 시
+  if (!user && pathname === '/') {
+    const loginUrl = new URL('/login', request.url)
+    return NextResponse.redirect(loginUrl)
+  }
+
+  // 이미 로그인한 상태로 로그인/회원가입 페이지 접근 시
+  if (user && (pathname === '/login' || pathname === '/signup')) {
+    const homeUrl = new URL('/', request.url)
+    return NextResponse.redirect(homeUrl)
+  }
+
+  // 세션 갱신 후 응답 반환
   return response
 }
 

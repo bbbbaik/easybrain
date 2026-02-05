@@ -1,7 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState, useEffect, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import Link from 'next/link'
 import { Input } from '@/components/ui/input'
@@ -11,41 +10,33 @@ import { Brain } from 'lucide-react'
 export default function LoginPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [error, setError] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
-  const router = useRouter()
-  const supabase = createClient()
+  const [isLoading, setIsLoading] = useState(false)
+  
+  // Supabase 클라이언트를 useRef로 한 번만 생성 (무한 루프 방지)
+  const supabaseRef = useRef(createClient())
+  const supabase = supabaseRef.current
 
-  // 이미 로그인된 경우 메인으로 자동 이동
+  // 이미 로그인된 경우 메인으로 자동 이동 (한 번만 실행)
   useEffect(() => {
     const checkSession = async () => {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession()
-      if (session) {
-        router.replace('/')
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession()
+        if (session) {
+          window.location.href = '/'
+        }
+      } catch (error) {
+        console.error('Error checking session:', error)
       }
     }
     checkSession()
-
-    // Auth state listener: 로그인 상태 변경 감지
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === 'SIGNED_IN' && session) {
-        router.replace('/')
-      }
-    })
-
-    return () => {
-      subscription.unsubscribe()
-    }
-  }, [router, supabase.auth])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []) // 빈 배열로 한 번만 실행
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
-    setError(null)
-    setLoading(true)
+    setIsLoading(true)
 
     try {
       const { data, error } = await supabase.auth.signInWithPassword({
@@ -53,15 +44,19 @@ export default function LoginPage() {
         password,
       })
 
-      if (error) throw error
+      if (error) {
+        alert(error.message)
+        setIsLoading(false)
+        return
+      }
 
-      // 로그인 성공 시 메인으로 리다이렉트 (useEffect의 onAuthStateChange가 처리)
+      // 로그인 성공 시 하드 리프레시로 메인으로 이동 (보안: 캐시 초기화)
       if (data.session) {
-        router.replace('/')
+        window.location.href = '/'
       }
     } catch (error: any) {
-      setError(error.message || '로그인에 실패했습니다.')
-      setLoading(false)
+      alert(error.message || '로그인에 실패했습니다.')
+      setIsLoading(false)
     }
   }
 
@@ -83,13 +78,6 @@ export default function LoginPage() {
 
           {/* Form */}
           <form className="space-y-5" onSubmit={handleLogin}>
-            {/* Error Message */}
-            {error && (
-              <div className="bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded-xl text-sm">
-                {error}
-              </div>
-            )}
-
             {/* Email Input */}
             <div className="space-y-2">
               <label htmlFor="email" className="text-sm font-medium text-toss-text">
@@ -129,10 +117,10 @@ export default function LoginPage() {
             {/* Submit Button */}
             <Button
               type="submit"
-              disabled={loading}
+              disabled={isLoading}
               className="w-full h-11 text-base font-medium"
             >
-              {loading ? '로그인 중...' : '로그인'}
+              {isLoading ? '로그인 중...' : '로그인'}
             </Button>
           </form>
 

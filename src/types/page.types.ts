@@ -5,9 +5,10 @@ export interface Page {
   parent_id: string | null
   title: string
   icon: string | null
-  cover_image: string | null
   content: any // JSON (Tiptap 문서 등)
   position: number
+  is_inbox: boolean
+  is_favorite: boolean
   created_at: string
   updated_at: string
   /** UI: 재귀 트리 렌더링용 자식 페이지 (옵셔널) */

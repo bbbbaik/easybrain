@@ -1,200 +1,104 @@
 'use client'
 
-import { useCallback } from 'react'
-import { DragDropContext, type DropResult } from '@hello-pangea/dnd'
-import { Brain, Plus } from 'lucide-react'
+import { useCallback, useState, useEffect } from 'react'
+import { Brain, Plus, LogOut } from 'lucide-react'
 import { usePageContext } from '@/contexts/PageContext'
-import {
-  reorderPages,
-  createPage,
-  getOrderedIdsForDroppable,
-  findPageNode,
-  type ReorderUpdate,
-} from '@/lib/supabase/pages'
-import type { PageNode } from '@/types/page.types'
-import { PageTree } from './PageTree'
+import { createClient } from '@/lib/supabase/client'
+import { getInboxPages, getSidebarTree, createPage as createPageService } from '@/services/pageService'
+import type { Page, PageNode } from '@/types/page'
+import { InboxSection } from './InboxSection'
+import { DocumentsSection } from './DocumentsSection'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
+import Link from 'next/link'
 
-function arrayMove<T>(arr: T[], fromIndex: number, toIndex: number): T[] {
-  const next = [...arr]
-  const [removed] = next.splice(fromIndex, 1)
-  next.splice(toIndex, 0, removed)
-  return next
-}
 
 export default function Sidebar() {
-  const { pageTree, refreshPages, updatePageOptimistically } = usePageContext()
+  const { selectPage, refreshPages } = usePageContext()
+  const [userEmail, setUserEmail] = useState<string | null>(null)
+  const [inboxPages, setInboxPages] = useState<Page[]>([])
+  const [folderTree, setFolderTree] = useState<PageNode[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const supabase = createClient()
 
-  /** 순환 참조 방지: targetId가 sourceId의 자손인지 확인 */
-  const isDescendant = useCallback(
-    (sourceId: string, targetId: string, nodes: PageNode[]): boolean => {
-      const sourceNode = findPageNode(nodes, sourceId)
-      if (!sourceNode) return false
-      const check = (node: PageNode): boolean => {
-        if (node.id === targetId) return true
-        return node.children.some((child) => check(child))
-      }
-      return check(sourceNode)
-    },
-    []
-  )
-
-  const onDragEnd = useCallback(
-    async (result: DropResult) => {
-      const { source, destination, draggableId, combine } = result
-
-      // 디버깅: result 객체 전체 확인
-      console.log('[DnD] onDragEnd called:', {
-        draggableId,
-        combine: combine ? combine.draggableId : null,
-        destination: destination ? `${destination.droppableId}[${destination.index}]` : null,
-        source: `${source.droppableId}[${source.index}]`,
-      })
-
-      // ============================================
-      // Case A: 합치기 (Combine) - 최우선 처리
-      // ============================================
-      // 중요: combine이 감지되면 reorderPages는 절대 실행하지 않고 즉시 return
-      if (result.combine) {
-        const targetPageId = result.combine.draggableId
-        console.log('✅ Combine 성공!', {
-          combine: result.combine,
-          draggableId,
-          targetPageId,
-          source: source.droppableId,
-        })
-
-        // 유효성 검사
-        if (draggableId === targetPageId) {
-          console.warn('[DnD] Cannot combine page with itself')
-          return
-        }
-
-        if (isDescendant(draggableId, targetPageId, pageTree)) {
-          console.warn('[DnD] Cannot make a page a child of its own descendant')
-          return
-        }
-
-        // Combine 로직: parent_id만 업데이트 (순서 변경 없음)
-        const sourceDroppableId = source.droppableId
-        const sourceParentId = sourceDroppableId === 'list-root' ? null : sourceDroppableId.replace(/^list-/, '')
-        const sourceIds = getOrderedIdsForDroppable(sourceDroppableId, pageTree)
-        const targetChildren = getOrderedIdsForDroppable(`list-${targetPageId}`, pageTree)
-
-        const sourceWithout = sourceIds.filter((id) => id !== draggableId)
-        const targetWith = [draggableId, ...targetChildren]
-
-        const updates: ReorderUpdate[] = [
-          ...sourceWithout.map((id, i) => ({ id, parent_id: sourceParentId, position: i })),
-          ...targetWith.map((id, i) => ({ id, parent_id: targetPageId, position: i })),
-        ]
-
-        console.log('[DnD] Combine updates:', updates)
-
-        // Optimistic Update
-        updatePageOptimistically(updates)
-
-        try {
-          await reorderPages(updates)
-          await refreshPages()
-          console.log('✅ Combine 처리 완료!', result.combine)
-        } catch (error) {
-          console.error('[DnD] Error combining pages:', error)
-          await refreshPages()
-        }
-        // 중요: Combine 처리 후 즉시 리턴 (순서 변경 로직 실행 방지)
-        return
-      }
-
-      // ============================================
-      // Case B: 순서 변경 (Reorder) - destination이 있을 때만 실행
-      // ============================================
-      // 중요: combine이 없을 때만 이 로직 실행됨
-      if (!destination) {
-        console.log('[DnD] No destination, drag cancelled')
-        return
-      }
-
-      const sourceDroppableId = source.droppableId
-      const destDroppableId = destination.droppableId
-
-      console.log('[DnD] Reorder detected:', {
-        draggableId,
-        source: { droppableId: sourceDroppableId, index: source.index },
-        destination: { droppableId: destDroppableId, index: destination.index },
-      })
-
-      let updates: ReorderUpdate[] = []
-
-      if (destDroppableId.startsWith('page-')) {
-        const targetPageId = destDroppableId.replace(/^page-/, '')
-        if (draggableId === targetPageId) return
-        if (isDescendant(draggableId, targetPageId, pageTree)) {
-          console.warn('[DnD] Cannot make a page a child of its own descendant')
-          return
-        }
-        const sourceParentId = sourceDroppableId === 'list-root' ? null : sourceDroppableId.replace(/^list-/, '')
-        const sourceIds = getOrderedIdsForDroppable(sourceDroppableId, pageTree)
-        const targetChildren = getOrderedIdsForDroppable(`list-${targetPageId}`, pageTree)
-        const sourceWithout = sourceIds.filter((id) => id !== draggableId)
-        const targetWith = [draggableId, ...targetChildren]
-        updates = [
-          ...sourceWithout.map((id, i) => ({ id, parent_id: sourceParentId, position: i })),
-          ...targetWith.map((id, i) => ({ id, parent_id: targetPageId, position: i })),
-        ]
-      } else {
-        const sourceParentId = sourceDroppableId === 'list-root' ? null : sourceDroppableId.replace(/^list-/, '')
-        const destParentId = destDroppableId === 'list-root' ? null : destDroppableId.replace(/^list-/, '')
-        const sourceIds = getOrderedIdsForDroppable(sourceDroppableId, pageTree)
-        const destIds = getOrderedIdsForDroppable(destDroppableId, pageTree)
-
-        if (sourceDroppableId === destDroppableId) {
-          // 같은 목록 내에서 순서 변경
-          const newOrder = arrayMove(sourceIds, source.index, destination.index)
-          updates = newOrder.map((id, i) => ({
-            id,
-            parent_id: sourceParentId,
-            position: i,
-          }))
-        } else {
-          // 다른 목록으로 이동
-          if (destParentId && isDescendant(draggableId, destParentId, pageTree)) {
-            console.warn('[DnD] Cannot move a page into its own descendant')
-            return
-          }
-          const sourceWithout = sourceIds.filter((id) => id !== draggableId)
-          const destWith = [...destIds]
-          destWith.splice(destination.index, 0, draggableId)
-          updates = [
-            ...sourceWithout.map((id, i) => ({ id, parent_id: sourceParentId, position: i })),
-            ...destWith.map((id, i) => ({ id, parent_id: destParentId, position: i })),
-          ]
-        }
-      }
-
-      console.log('[DnD] Reorder updates:', updates)
-
-      // Optimistic Update
-      updatePageOptimistically(updates)
-
+  // 사용자 정보 및 페이지 데이터 가져오기
+  useEffect(() => {
+    const loadData = async () => {
+      setIsLoading(true)
       try {
-        await reorderPages(updates)
-        await refreshPages()
-        console.log('[DnD] Reorder successful')
+        // 사용자 정보
+        const {
+          data: { user },
+        } = await supabase.auth.getUser()
+        setUserEmail(user?.email || null)
+
+        // 페이지 데이터 (pageService 사용)
+        const [inbox, tree] = await Promise.all([
+          getInboxPages(),
+          getSidebarTree(),
+        ])
+        setInboxPages(inbox)
+        setFolderTree(tree)
       } catch (error) {
-        console.error('[DnD] Error reordering pages:', error)
-        await refreshPages() // 실패 시 원래 상태로 복구
+        console.error('Error loading sidebar data:', error)
+        setInboxPages([])
+        setFolderTree([])
+      } finally {
+        setIsLoading(false)
       }
-    },
-    [pageTree, refreshPages, isDescendant, updatePageOptimistically]
-  )
+    }
+
+    loadData()
+
+    // Auth state 변경 감지
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async (event, session) => {
+      setUserEmail(session?.user?.email || null)
+      // 로그인/로그아웃 시 데이터 다시 로드
+      if (event === 'SIGNED_IN' || event === 'SIGNED_OUT') {
+        const [inbox, tree] = await Promise.all([
+          getInboxPages(),
+          getSidebarTree(),
+        ])
+        setInboxPages(inbox)
+        setFolderTree(tree)
+      }
+    })
+
+    return () => {
+      subscription.unsubscribe()
+    }
+  }, [supabase.auth])
+
+  // 로그아웃 핸들러 (보안: 하드 리프레시로 메모리 초기화)
+  const handleLogout = useCallback(async () => {
+    try {
+      const { error } = await supabase.auth.signOut()
+      if (error) {
+        alert(error.message)
+        return
+      }
+      // window.location.href를 사용하여 하드 리프레시로 페이지 이동
+      // 이렇게 하면 클라이언트 상태(Context 등)가 완전히 초기화되어 보안상 안전함
+      window.location.href = '/login'
+    } catch (error: any) {
+      alert(error.message || '로그아웃에 실패했습니다.')
+    }
+  }, [supabase.auth])
 
   const handleAddPage = useCallback(async () => {
     try {
-      await createPage('제목 없음', null)
-      await refreshPages()
+      await createPageService({ title: '제목 없음', is_inbox: false })
+      // 데이터 새로고침
+      const [inbox, tree] = await Promise.all([
+        getInboxPages(),
+        getSidebarTree(),
+      ])
+      setInboxPages(inbox)
+      setFolderTree(tree)
+      await refreshPages() // PageContext도 업데이트
     } catch (error) {
       console.error('Error creating page:', error)
     }
@@ -212,14 +116,13 @@ export default function Sidebar() {
       <Separator className="bg-transparent h-px" />
 
       <ScrollArea className="flex-1 px-3 py-4">
-        <DragDropContext onDragEnd={onDragEnd}>
-          <div className="space-y-1">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-[#8B95A1] mb-3 px-3">
-              페이지
-            </h3>
-            <PageTree pages={pageTree} parentId={null} depth={0} />
-          </div>
-        </DragDropContext>
+        <div className="space-y-6">
+          {/* Inbox Section */}
+          <InboxSection pages={inboxPages} isLoading={isLoading} />
+
+          {/* Documents Section */}
+          <DocumentsSection tree={folderTree} isLoading={isLoading} />
+        </div>
       </ScrollArea>
 
       <Separator className="bg-transparent h-px" />
@@ -234,6 +137,37 @@ export default function Sidebar() {
           <Plus size={18} />
           새 페이지 추가
         </Button>
+      </div>
+
+      {/* User Profile Section */}
+      <div className="mt-auto border-t border-black/5 p-4 shrink-0">
+        {userEmail ? (
+          <div className="space-y-2">
+            <p className="text-xs text-toss-gray truncate">{userEmail}</p>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleLogout}
+              className="w-full justify-start gap-2 rounded-xl py-2 text-[#8B95A1] hover:bg-[rgba(0,0,0,0.04)] hover:text-toss-text text-xs"
+            >
+              <LogOut size={14} />
+              로그아웃
+            </Button>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <p className="text-xs text-toss-gray">로그인 필요</p>
+            <Link href="/login">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="w-full justify-start gap-2 rounded-xl py-2 text-toss-blue hover:bg-[rgba(0,0,0,0.04)] text-xs"
+              >
+                로그인
+              </Button>
+            </Link>
+          </div>
+        )}
       </div>
     </aside>
   )
