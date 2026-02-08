@@ -14,12 +14,27 @@ const PLACEHOLDERS = [
 
 export function QuickCapture() {
   const [isOpen, setIsOpen] = useState(false)
+  const [isClosing, setIsClosing] = useState(false)
+  const [isAnimatedOpen, setIsAnimatedOpen] = useState(false)
   const [inputValue, setInputValue] = useState('')
   const [placeholder, setPlaceholder] = useState(PLACEHOLDERS[0])
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [bottomOffset, setBottomOffset] = useState<number | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const router = useRouter()
+  const SAFETY_TIMEOUT_MS = 5000
+
+  // 상태 초기화 (반복 사용 시 무한 로딩 방지)
+  const resetState = useCallback(() => {
+    setInputValue('')
+    setIsSubmitting(false)
+  }, [])
+
+  // 닫기: 클로즈 애니메이션 후 상태 청소 (ESC·배경 클릭·저장 성공 시 공통)
+  const handleClose = useCallback(() => {
+    if (isClosing) return
+    setIsClosing(true)
+  }, [isClosing])
 
   // 랜덤 placeholder 선택
   useEffect(() => {
@@ -27,28 +42,38 @@ export function QuickCapture() {
     setPlaceholder(randomPlaceholder)
   }, [])
 
-  // 모달 열릴 때 상태 초기화 및 body overflow 처리
+  // 모달 열릴 때 강제 초기화 + Elastic 오픈 애니메이션 트리거
   useEffect(() => {
     if (isOpen) {
-      // 상태 초기화: 입력창 텍스트와 로딩 상태를 초기화
-      setInputValue('')
-      setIsSubmitting(false)
+      resetState()
+      setIsAnimatedOpen(false)
       setBottomOffset(null)
-      
       document.body.style.overflow = 'hidden'
-      // 포커스 설정
-      setTimeout(() => {
-        inputRef.current?.focus()
-      }, 100)
+      const openTimer = requestAnimationFrame(() => {
+        requestAnimationFrame(() => setIsAnimatedOpen(true))
+      })
+      const focusTimer = setTimeout(() => inputRef.current?.focus(), 150)
+      return () => {
+        cancelAnimationFrame(openTimer)
+        clearTimeout(focusTimer)
+        document.body.style.overflow = ''
+      }
     } else {
       document.body.style.overflow = ''
       setBottomOffset(null)
     }
+  }, [isOpen, resetState])
 
-    return () => {
-      document.body.style.overflow = ''
-    }
-  }, [isOpen])
+  // 클로즈 애니메이션 후 실제 언마운트
+  useEffect(() => {
+    if (!isClosing) return
+    const id = setTimeout(() => {
+      setIsOpen(false)
+      setIsClosing(false)
+      resetState()
+    }, 200)
+    return () => clearTimeout(id)
+  }, [isClosing, resetState])
 
   // VisualViewport API로 모바일 키보드 대응
   useEffect(() => {
@@ -98,9 +123,9 @@ export function QuickCapture() {
         setIsOpen((prev) => !prev)
       }
 
-      // Esc 키로 닫기
+      // Esc 키로 닫기 (상태 청소 후 닫기)
       if (e.key === 'Escape' && isOpen) {
-        setIsOpen(false)
+        handleClose()
       }
     }
 
@@ -108,35 +133,52 @@ export function QuickCapture() {
     return () => {
       window.removeEventListener('keydown', handleKeyDown)
     }
-  }, [isOpen])
+  }, [isOpen, handleClose])
 
-  // 페이지 생성 핸들러
-  const handleSubmit = useCallback(async () => {
-    if (!inputValue.trim() || isSubmitting) return
+  // 페이지 생성 핸들러 (5초 안전 타임아웃 + handleClose로 청소)
+  const handleSubmit = useCallback(
+    async (e?: React.FormEvent | React.KeyboardEvent) => {
+      e?.preventDefault?.()
+      if (!inputValue.trim() || isSubmitting) return
 
-    setIsSubmitting(true)
-    
-    try {
-      // 페이지 생성 요청
-      await createPage({
-        title: inputValue.trim(),
-        is_inbox: true,
-      })
-      
-      // 성공 시: 모달 닫기 및 화면 갱신
-      setIsOpen(false)
-      router.refresh()
-    } catch (error: any) {
-      // 에러 처리: 상세 로그 및 사용자 알림
-      console.error('Error creating page:', error)
-      const errorMessage = error?.message || '알 수 없는 오류가 발생했습니다.'
-      alert(`저장 실패: ${errorMessage}`)
-      // 에러 발생 시에도 모달은 열어두고, 로딩 상태만 해제
-    } finally {
-      // 성공하든 실패하든 무조건 로딩 상태 해제 (무한 로딩 방지)
-      setIsSubmitting(false)
-    }
-  }, [inputValue, isSubmitting, router])
+      setIsSubmitting(true)
+
+      // 안전 타이머: 5초 내 완료되지 않으면 강제 해제 (무한 로딩 원천 차단)
+      let timeoutFired = false
+      const timeoutId = window.setTimeout(() => {
+        timeoutFired = true
+        setIsSubmitting(false)
+        alert('저장 시간이 초과되었습니다. 다시 시도해주세요.')
+      }, SAFETY_TIMEOUT_MS)
+
+      try {
+        await createPage({
+          title: inputValue.trim(),
+          is_inbox: true,
+        })
+
+        window.clearTimeout(timeoutId)
+        if (timeoutFired) return
+
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('refresh-pages'))
+        }
+        handleClose()
+        router.refresh()
+      } catch (error: any) {
+        window.clearTimeout(timeoutId)
+        console.error('Error creating page:', error)
+        const errorMessage = error?.message || '알 수 없는 오류가 발생했습니다.'
+        alert(`저장 실패: ${errorMessage}`)
+      } finally {
+        // 타임아웃이 이미 로딩 해제한 경우 제외
+        if (!timeoutFired) {
+          setIsSubmitting(false)
+        }
+      }
+    },
+    [inputValue, isSubmitting, router, handleClose]
+  )
 
   // Enter 키 처리 (키보드 포커스 누수 방지)
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -150,7 +192,7 @@ export function QuickCapture() {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       e.stopPropagation()
-      handleSubmit()
+      handleSubmit(e)
     }
   }
 
@@ -159,36 +201,40 @@ export function QuickCapture() {
     e.stopPropagation()
   }
 
-  if (!isOpen) return null
+  const visible = isOpen || isClosing
+
+  if (!visible) return null
 
   return (
     <>
-      {/* Backdrop */}
+      {/* Overlay: 뒤쪽 콘텐츠 흐리게 */}
       <div
-        className="fixed inset-0 z-[9999] bg-black/50 backdrop-blur-sm"
-        onClick={() => setIsOpen(false)}
+        className={cn(
+          'fixed inset-0 z-[9999] bg-black/40 backdrop-blur-sm transition-opacity duration-200',
+          isClosing ? 'opacity-0' : 'opacity-100'
+        )}
+        onClick={handleClose}
         aria-hidden="true"
       />
 
-      {/* Input Container */}
+      {/* Dialog: Glassmorphism + Elastic open / quick close */}
       <div
         className={cn(
-          'fixed left-1/2 z-[9999] w-full max-w-2xl -translate-x-1/2 transition-all duration-200',
-          bottomOffset !== null
-            ? 'bottom-auto'
-            : 'top-1/2 -translate-y-1/2'
+          'fixed left-1/2 z-[9999] w-full max-w-2xl -translate-x-1/2',
+          bottomOffset !== null ? 'bottom-auto' : 'top-1/2 -translate-y-1/2',
+          'transition-all',
+          isClosing ? 'duration-200 ease-out scale-95 opacity-0' : 'duration-350 ease-elastic',
+          isAnimatedOpen && !isClosing ? 'scale-100 opacity-100' : 'scale-95 opacity-0'
         )}
         style={
           bottomOffset !== null
-            ? {
-                bottom: `${bottomOffset}px`,
-              }
+            ? { bottom: `${bottomOffset}px` }
             : undefined
         }
         onClick={(e) => e.stopPropagation()}
         onKeyDown={handleContainerKeyDown}
       >
-        <div className="mx-4">
+        <div className="mx-4 rounded-2xl bg-white/60 backdrop-blur-xl shadow-elevation-floating p-2">
           <Input
             ref={inputRef}
             type="text"
@@ -198,14 +244,14 @@ export function QuickCapture() {
             placeholder={placeholder}
             disabled={isSubmitting}
             className={cn(
-              'w-full rounded-xl border-2 border-gray-200 bg-white px-6 py-4 text-lg shadow-lg',
-              'focus:border-toss-blue focus:outline-none focus:ring-2 focus:ring-toss-blue/20',
-              'placeholder:text-toss-gray',
-              'transition-all duration-200'
+              'w-full rounded-xl border-0 bg-transparent px-5 py-4 text-xl shadow-none outline-none',
+              'placeholder:text-slate-400 text-slate-900 font-medium',
+              'focus:ring-0 focus:outline-none focus-visible:ring-0',
+              'transition-colors duration-200'
             )}
           />
           {isSubmitting && (
-            <div className="mt-2 text-center text-sm text-toss-gray">
+            <div className="px-5 pb-2 text-center text-sm text-slate-500 leading-relaxed">
               저장 중...
             </div>
           )}

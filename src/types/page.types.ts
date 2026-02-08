@@ -9,6 +9,7 @@ export interface Page {
   position: number
   is_inbox: boolean
   is_favorite: boolean
+  is_deleted: boolean
   created_at: string
   updated_at: string
   /** UI: 재귀 트리 렌더링용 자식 페이지 (옵셔널) */

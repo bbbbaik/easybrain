@@ -23,7 +23,8 @@ export async function getInboxPages(): Promise<Page[]> {
     .select('*')
     .eq('user_id', user.id)
     .eq('is_inbox', true)
-    .order('created_at', { ascending: false })
+    .eq('is_deleted', false)
+    .order('position', { ascending: true })
 
   if (error) {
     console.error('Error fetching inbox pages:', error)
@@ -48,6 +49,7 @@ export async function getSidebarTree(): Promise<PageNode[]> {
     .select('*')
     .eq('user_id', user.id)
     .eq('is_inbox', false)
+    .eq('is_deleted', false)
     .order('position', { ascending: true })
     .order('created_at', { ascending: true })
 
@@ -58,6 +60,30 @@ export async function getSidebarTree(): Promise<PageNode[]> {
 
   const pages = (data || []) as Page[]
   return buildPageTree(pages)
+}
+
+/**
+ * 휴지통 페이지 목록 조회 (is_deleted = true)
+ */
+export async function getTrashPages(): Promise<Page[]> {
+  const supabase = createClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) return []
+
+  const { data, error } = await supabase
+    .from('pages')
+    .select('*')
+    .eq('user_id', user.id)
+    .eq('is_deleted', true)
+    .order('updated_at', { ascending: false })
+
+  if (error) {
+    console.error('Error fetching trash pages:', error)
+    return []
+  }
+  return (data || []) as Page[]
 }
 
 /**
@@ -110,6 +136,7 @@ export async function createPage(data: PageInsert): Promise<Page> {
     position: data.position ?? position,
     is_inbox: data.is_inbox !== undefined ? data.is_inbox : false,
     is_favorite: data.is_favorite ?? false,
+    is_deleted: false,
   }
 
   // insert 요청 (select().single()로 결과를 바로 받아옴)
@@ -139,6 +166,39 @@ export async function createPage(data: PageInsert): Promise<Page> {
 }
 
 /**
+ * 해당 컨테이너(인박스 또는 부모 폴더)에서 다음 position 값 조회
+ * - isInbox true: is_inbox=true인 페이지들 중 max(position)+1
+ * - isInbox false, parentId: parent_id=parentId인 페이지들 중 max(position)+1
+ */
+export async function getNextPositionForParent(
+  parentId: string | null,
+  isInbox: boolean
+): Promise<number> {
+  const supabase = createClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) return 0
+
+  let q = supabase
+    .from('pages')
+    .select('position')
+    .eq('user_id', user.id)
+    .order('position', { ascending: false })
+    .limit(1)
+
+  if (isInbox) {
+    q = q.eq('is_inbox', true).eq('is_deleted', false)
+  } else {
+    q = q.eq('is_inbox', false).eq('is_deleted', false).is('parent_id', parentId)
+  }
+
+  const { data } = await q
+  const maxPos = data?.[0]?.position
+  return typeof maxPos === 'number' ? maxPos + 1 : 0
+}
+
+/**
  * 페이지 수정
  */
 export async function updatePage(pageId: string, data: PageUpdate): Promise<Page> {
@@ -161,10 +221,9 @@ export async function updatePage(pageId: string, data: PageUpdate): Promise<Page
 }
 
 /**
- * 페이지 삭제 (하위 페이지도 함께 삭제)
- * 
- * 참고: DB의 ON DELETE CASCADE 설정에 따라 자동으로 하위 페이지가 삭제됩니다.
- * 하지만 명시적으로 확인하고 처리하는 것이 더 안전합니다.
+ * 페이지 삭제 (Soft Delete & Hard Delete)
+ * - is_deleted === false → Soft Delete: updatePage(id, { is_deleted: true }) (휴지통으로)
+ * - is_deleted === true  → Hard Delete: DB에서 영구 삭제
  */
 export async function deletePage(pageId: string): Promise<void> {
   const supabase = createClient()
@@ -173,25 +232,21 @@ export async function deletePage(pageId: string): Promise<void> {
   } = await supabase.auth.getUser()
   if (!user) throw new Error('User not authenticated')
 
-  // 하위 페이지 확인 (선택사항: 삭제 전 확인)
-  const { data: children } = await supabase
-    .from('pages')
-    .select('id')
-    .eq('parent_id', pageId)
-    .eq('user_id', user.id)
+  const page = await getPage(pageId)
+  if (!page) throw new Error('페이지를 찾을 수 없습니다.')
 
-  if (children && children.length > 0) {
-    console.warn(`Deleting page ${pageId} with ${children.length} child pages`)
-    // DB의 CASCADE 설정에 따라 자동 삭제되지만, 필요시 여기서 명시적으로 삭제할 수 있습니다.
+  if (page.is_deleted === true) {
+    // Hard Delete: 휴지통에 있는 항목 영구 삭제
+    const { error } = await supabase
+      .from('pages')
+      .delete()
+      .eq('id', pageId)
+      .eq('user_id', user.id)
+    if (error) throw error
+  } else {
+    // Soft Delete: 휴지통으로 이동
+    await updatePage(pageId, { is_deleted: true })
   }
-
-  const { error } = await supabase
-    .from('pages')
-    .delete()
-    .eq('id', pageId)
-    .eq('user_id', user.id) // 보안: 자신의 페이지만 삭제 가능
-
-  if (error) throw error
 }
 
 /**

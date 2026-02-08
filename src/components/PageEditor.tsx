@@ -6,6 +6,7 @@ import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
 import { Markdown } from 'tiptap-markdown'
+import Link from 'next/link'
 import { usePageContext } from '@/contexts/PageContext'
 import { createPage, updatePage, getPage } from '@/lib/supabase/pages'
 import { uploadImage } from '@/lib/imageUpload'
@@ -35,24 +36,15 @@ export default function PageEditor({ onSave }: PageEditorProps) {
   const { selectedPageId, selectPage, refreshPages, pages } = usePageContext()
   const toastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // 브레드크럼 경로 계산: 현재 페이지부터 parent_id를 따라 올라가면서 경로 구성
-  const breadcrumbPath = useMemo(() => {
-    if (!selectedPageId || pages.length === 0) return []
-    
-    const path: Page[] = []
-    let currentPageId: string | null = selectedPageId
-    
-    // parent_id를 따라 올라가면서 경로 구성
-    while (currentPageId) {
-      const page = pages.find((p) => p.id === currentPageId)
-      if (!page) break
-      path.push(page)
-      currentPageId = page.parent_id
-    }
-    
-    // 루트부터 현재까지 순서로 정렬 (역순)
-    return path.reverse()
-  }, [selectedPageId, pages])
+  // 상위 페이지(부모): parent_id로 조회. 루트면 null.
+  const currentPage = useMemo(
+    () => (selectedPageId ? pages.find((p) => p.id === selectedPageId) ?? null : null),
+    [selectedPageId, pages]
+  )
+  const parentPage = useMemo(
+    () => (currentPage?.parent_id ? pages.find((p) => p.id === currentPage.parent_id) ?? null : null),
+    [currentPage, pages]
+  )
 
   // Toast 표시 함수
   const showToast = useCallback((message: string, type: 'success' | 'error' | 'info' = 'info') => {
@@ -344,49 +336,20 @@ export default function PageEditor({ onSave }: PageEditorProps) {
   }, [title, editor, selectedPageId, onSave, refreshPages])
 
   return (
-    <div className="h-full flex flex-col bg-background">
-      <div className="flex justify-between items-center px-6 py-3 border-b border-border/50 bg-muted/30">
-        <div className="flex items-center gap-2">
-          {selectedPageId && (
-            <>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-muted-foreground hover:text-foreground -ml-2"
-                onClick={() => {
-                  selectPage(null)
-                  setTitle('')
-                  editor?.commands.clearContent()
-                }}
-              >
-                ← 새 글 작성
-              </Button>
-              {breadcrumbPath.length > 0 && (
-                <nav className="flex items-center gap-1 text-sm text-muted-foreground">
-                  {breadcrumbPath.map((page, index) => {
-                    const isLast = index === breadcrumbPath.length - 1
-                    return (
-                      <span key={page.id} className="flex items-center gap-1">
-                        {index > 0 && <span className="mx-1 select-none">›</span>}
-                        {isLast ? (
-                          <span className="text-foreground font-medium">
-                            {page.title || '제목 없음'}
-                          </span>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => selectPage(page.id)}
-                            className="hover:text-foreground transition-colors cursor-pointer"
-                          >
-                            {page.title || '제목 없음'}
-                          </button>
-                        )}
-                      </span>
-                    )
-                  })}
-                </nav>
-              )}
-            </>
+    <div className="h-full flex flex-col bg-white">
+      <header className="flex justify-between items-start px-12 py-4 shrink-0">
+        <div className="flex items-start gap-2 max-w-[800px]">
+          {selectedPageId && parentPage && (
+            <Link
+              href={`/pages/${parentPage.id}`}
+              className="text-sm text-slate-500 hover:text-slate-900 -ml-2 transition-colors text-left"
+              onClick={(e) => {
+                e.preventDefault()
+                selectPage(parentPage.id)
+              }}
+            >
+              ← {parentPage.title || '제목 없음'}
+            </Link>
           )}
         </div>
 
@@ -395,33 +358,32 @@ export default function PageEditor({ onSave }: PageEditorProps) {
             variant="ghost"
             size="sm"
             onClick={copyAsMarkdown}
-            className="text-muted-foreground hover:text-foreground hover:bg-muted"
+            className="text-slate-500 hover:text-slate-900 hover:bg-slate-100/50 px-4 py-2"
           >
             MD 복사
           </Button>
-          
           <Button
             onClick={handleSave}
             disabled={isSaving || isLoading}
             size="sm"
-            className="shrink-0"
+            className="shrink-0 bg-transparent text-[#3182F6] font-semibold hover:bg-blue-50 px-4 py-2 shadow-none"
           >
             {isSaving ? '저장 중...' : isLoading ? '로딩 중...' : '저장'}
           </Button>
         </div>
-      </div>
+      </header>
 
       <div className="flex-1 overflow-y-auto">
-        <div className="max-w-3xl mx-auto px-6 sm:px-10 py-10">
+        <div className="max-w-[800px] w-full mx-0 pl-12 pr-12 pb-10 pt-2 text-left">
           <input
             type="text"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder="제목 없음"
-            className="w-full bg-transparent border-0 outline-none text-foreground placeholder:text-muted-foreground focus:ring-0 focus:outline-none text-[2rem] sm:text-[2.25rem] font-bold leading-tight tracking-tight mb-2"
+            className="w-full bg-transparent border-0 outline-none text-slate-900 placeholder:text-slate-400 focus:ring-0 focus:outline-none text-[2rem] sm:text-[2.25rem] font-bold leading-tight tracking-tight mb-2 text-left"
           />
 
-          <div className="mt-6 [&_.ProseMirror]:outline-none [&_.ProseMirror]:min-h-[380px] [&_.ProseMirror]:text-[1.0625rem] [&_.ProseMirror]:leading-[1.75] [&_.ProseMirror]:text-foreground">
+          <div className="mt-6 [&_.ProseMirror]:outline-none [&_.ProseMirror]:min-h-[380px] [&_.ProseMirror]:text-[1.0625rem] [&_.ProseMirror]:leading-[1.75] [&_.ProseMirror]:text-slate-900 [&_.ProseMirror]:text-left">
             <EditorContent editor={editor} />
           </div>
         </div>

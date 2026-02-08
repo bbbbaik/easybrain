@@ -14,6 +14,7 @@ export async function getPages(): Promise<Page[]> {
     .from('pages')
     .select('*')
     .eq('user_id', user.id)
+    .eq('is_deleted', false)
     .order('position', { ascending: true })
     .order('created_at', { ascending: true })
 

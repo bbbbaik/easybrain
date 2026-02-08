@@ -37,7 +37,7 @@ export default function RootLayout({
           href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css"
         />
       </head>
-      <body className="font-sans antialiased tracking-tight bg-toss-base min-h-screen">
+      <body className="font-sans antialiased tracking-tight bg-[#F9FAFB] min-h-screen">
         <Providers>
           {children}
           <QuickCapture />
